@@ -1,0 +1,731 @@
+diff --git a/Makefile b/Makefile
+index 62240a5..96c2694 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,4 +1,4 @@
+-# See LICENSE file for copyright and license details.
++# dwmstatus - status for dwm
+ 
+ include config.mk
+ 
+@@ -17,7 +17,10 @@ options:
+ 	@echo CC $<
+ 	@${CC} -c ${CFLAGS} $<
+ 
+-${OBJ}: config.mk
++${OBJ}: config.h config.mk
++
++config.h:
++	cp config.def.h $@
+ 
+ ${NAME}: ${OBJ}
+ 	@echo CC -o $@
+@@ -25,25 +28,17 @@ ${NAME}: ${OBJ}
+ 
+ clean:
+ 	@echo cleaning
+-	@rm -f ${NAME} ${OBJ} ${NAME}-${VERSION}.tar.gz
+-
+-dist: clean
+-	@echo creating dist tarball
+-	@mkdir -p ${NAME}-${VERSION}
+-	@cp -R Makefile LICENSE config.mk \
+-		${SRC} ${NAME}-${VERSION}
+-	@tar -cf ${NAME}-${VERSION}.tar ${NAME}-${VERSION}
+-	@gzip ${NAME}-${VERSION}.tar
+-	@rm -rf ${NAME}-${VERSION}
++	@rm -f ${NAME} ${OBJ}
+ 
+ install: all
+-	@echo installing executable file to ${DESTDIR}${PREFIX}/bin
+-	@mkdir -p ${DESTDIR}${PREFIX}/bin
+-	@cp -f ${NAME} ${DESTDIR}${PREFIX}/bin
+-	@chmod 755 ${DESTDIR}${PREFIX}/bin/${NAME}
++	mkdir -p ${DESTDIR}${PREFIX}/bin
++	cp -f ${NAME} ${DESTDIR}${PREFIX}/bin
++	chmod 755 ${DESTDIR}${PREFIX}/bin/${NAME}
+ 
+ uninstall:
+-	@echo removing executable file from ${DESTDIR}${PREFIX}/bin
+-	@rm -f ${DESTDIR}${PREFIX}/bin/${NAME}
++	rm -f ${DESTDIR}${PREFIX}/bin/${NAME}
++
++run:
++	./${NAME}
+ 
+-.PHONY: all options clean dist install uninstall
++.PHONY: all options clean install uninstall run
+diff --git a/config.def.h b/config.def.h
+index e69de29..3f5c641 100644
+--- a/config.def.h
++++ b/config.def.h
+@@ -0,0 +1,56 @@
++/* apt-get install libasound2-dev */
++
++#define LEN(x) (sizeof (x) / sizeof *(x))
++
++#define STEP 5
++
++static const char BATSTATE_CHARGING[] = "Charging";
++static const char BATSTATE_DISCHARGING[] = "Discharging";
++static const char BATSTATE_FULL[] = "Full";
++static const char BATSTATE_UNKNOWN[] = "Unknown";
++
++static const char *BATSTATE_SYM_UNKNOWN = "?";
++static const char *BAT_CRITICAL_COL_CODE = "\x03";
++static const char *BAT_WARN_COL_CODE = "\x0f";
++static const char *BAT_OK_COL_CODE = "\x06";
++
++static const BatStateMap batstates[] = {
++	/* state		 		sym */
++	{ BATSTATE_CHARGING,    "~" },
++	{ BATSTATE_DISCHARGING, "↓" },
++	{ BATSTATE_FULL,        "✓" },
++};
++
++static const char *PCT_MAX = "**";
++static const char *PCT_MIN = "--";
++static const char *DEVICE_BATTERY = "BAT1";
++static const char *DEVICE_BRIGHTNESS = "intel_backlight";
++static const char *SOUND_CARD = "default";
++static const char *SOUND_ELEMENT = "Master";
++static const char *FMT_DATE = "%H:%M";
++
++static const int INTERVAL = 5;
++
++/*
++ * \x01 - Normal
++ * \x02 - Selection
++ * \x03 - Urgent
++ * \x04 - Dark Background
++ * \x05 - Dark Red
++ * \x06 - Dark Green
++ * \x07 - Dark Yellow
++ * \x08 - Dark Blue
++ * \x09 - Dark Purple
++ * \x0a - Dark Turquoise 
++ * \x0b - Dark Grey
++ * \x0c - Light Background
++ * \x0d - Light Red
++ * \x0e - Light Green
++ * \x0f - Light Yellow
++ * \x10 - Light Blue
++ * \x11 - Light Purple
++ * \x12 - Light Turquoise
++ * \x13 - Light Grey
++ */
++
++static const char *FMT_STATUS = "%s≡ %s %s %s\x0a ☼ %s \x08♫ %s \x11| %s \x0b%s";
+diff --git a/config.mk b/config.mk
+index 0ec9e47..3da178b 100644
+--- a/config.mk
++++ b/config.mk
+@@ -1,29 +1,16 @@
+ NAME = dwmstatus
+-VERSION = 1.0
++VERSION = 1.1
+ 
+ # Customize below to fit your system
+ 
+-# paths
+-PREFIX = /usr
+-MANPREFIX = ${PREFIX}/share/man
+-
+-X11INC = /usr/X11R6/include
+-X11LIB = /usr/X11R6/lib
+-
+ # includes and libs
+-INCS = -I. -I/usr/include -I${X11INC}
+-LIBS = -L/usr/lib -lc -L${X11LIB} -lX11
++INCS = -I. -I/usr/include #-I${X11INC}
++LIBS = -L/usr/lib -lc -lX11 -lasound -lm #-L${X11LIB}
+ 
+ # flags
+ CPPFLAGS = -DVERSION=\"${VERSION}\" -D_DEFAULT_SOURCE
+ CFLAGS = -g -std=c99 -pedantic -Wall -O0 ${INCS} ${CPPFLAGS}
+-#CFLAGS = -std=c99 -pedantic -Wall -Os ${INCS} ${CPPFLAGS}
+ LDFLAGS = -g ${LIBS}
+-#LDFLAGS = -s ${LIBS}
+-
+-# Solaris
+-#CFLAGS = -fast ${INCS} -DVERSION=\"${VERSION}\"
+-#LDFLAGS = ${LIBS}
+ 
+ # compiler and linker
+ CC = cc
+diff --git a/dwmstatus.c b/dwmstatus.c
+index d2a4b03..625844d 100644
+--- a/dwmstatus.c
++++ b/dwmstatus.c
+@@ -1,227 +1,429 @@
+-/*
+- * Copy me if you can.
+- * by 20h
+- */
+-
+-#define _BSD_SOURCE
+-#include <unistd.h>
++#include <alsa/asoundlib.h>
++#include <ctype.h>
++#include <limits.h>
++#include <locale.h>
++#include <math.h>
++#include <stdarg.h>
++#include <stdint.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <stdarg.h>
+ #include <string.h>
+-#include <strings.h>
+-#include <sys/time.h>
+ #include <time.h>
+-#include <sys/types.h>
+-#include <sys/wait.h>
++#include <unistd.h>
+ 
++#include <X11/XKBlib.h>
+ #include <X11/Xlib.h>
+ 
+-char *tzargentina = "America/Buenos_Aires";
+-char *tzutc = "UTC";
+-char *tzberlin = "Europe/Berlin";
++typedef struct {
++	const char *state;
++	const char *symbol;
++} BatStateMap;
++
++#include "config.h"
+ 
+ static Display *dpy;
++static char status[128];
+ 
+-char *
+-smprintf(char *fmt, ...)
++void
++setstatus(const char *fmt, ...)
+ {
+ 	va_list fmtargs;
+-	char *ret;
+-	int len;
+ 
++	memset(status, 0, LEN(status));
+ 	va_start(fmtargs, fmt);
+-	len = vsnprintf(NULL, 0, fmt, fmtargs);
++	vsprintf(status, fmt, fmtargs);
+ 	va_end(fmtargs);
+ 
+-	ret = malloc(++len);
+-	if (ret == NULL) {
+-		perror("malloc");
+-		exit(1);
+-	}
++	XStoreName(dpy, DefaultRootWindow(dpy), status);
++	XSync(dpy, False);
++}
++
++char *
++readfile(char *fmt, ...)
++{
++	static char line[513] = {0};
++
++	va_list fmtargs;
++	char path[PATH_MAX];
++	FILE *fd;
++
++	memset(line, 0, sizeof(line));
+ 
+ 	va_start(fmtargs, fmt);
+-	vsnprintf(ret, len, fmt, fmtargs);
++	vsprintf(path, fmt, fmtargs);
+ 	va_end(fmtargs);
+ 
+-	return ret;
++	fd = fopen(path, "r");
++	if (fd == NULL)
++		return NULL;
++
++	if (fgets(line, sizeof(line)-1, fd) == NULL)
++		return NULL;
++	fclose(fd);
++
++	return line;
+ }
+ 
+-void
+-settz(char *tzname)
++char *
++fmtpct(char *buf, size_t len, int val)
+ {
+-	setenv("TZ", tzname, 1);
++	memset(buf, 0, len);
++
++    if (val >= 100) {
++        strcpy(buf, PCT_MAX);
++    }
++    else if (val < 1) {
++        strcpy(buf, PCT_MIN);
++    }
++    else {
++        sprintf(buf, "%02d", val);
++    }
++
++	return buf;
++}
++
++int
++graduatepct(int val)
++{
++    if (val > 100)
++        return 100;
++
++    int lower = val < STEP ? 0 : val - val % STEP;
++    int upper = lower + STEP;
++
++    return (val - lower) < (upper - val) ? lower : upper;
+ }
+ 
+ char *
+-mktimes(char *fmt, char *tzname)
++getbatstate(const char *bat)
+ {
+-	char buf[129];
+-	time_t tim;
+-	struct tm *timtm;
++	static char batstate[12] = {0};
++	char *co;
+ 
+-	settz(tzname);
+-	tim = time(NULL);
+-	timtm = localtime(&tim);
+-	if (timtm == NULL)
+-		return smprintf("");
++	strcpy(batstate, BATSTATE_UNKNOWN);
+ 
+-	if (!strftime(buf, sizeof(buf)-1, fmt, timtm)) {
+-		fprintf(stderr, "strftime == 0\n");
+-		return smprintf("");
+-	}
++	co = readfile("/sys/class/power_supply/%s/status", bat);
++	if (co == NULL)
++		return batstate;
++	sscanf(co, "%12s", batstate);
+ 
+-	return smprintf("%s", buf);
++	return batstate;
+ }
+ 
+-void
+-setstatus(char *str)
++char *
++getbatstatesym(const char *bat)
+ {
+-	XStoreName(dpy, DefaultRootWindow(dpy), str);
+-	XSync(dpy, False);
++	static char sbatstate[2] = {0};
++	int i;
++
++	char *batstate = getbatstate(bat);
++
++	for (i = 0; i < LEN(batstates); i++) {
++		if (!strcmp(batstates[i].state, batstate)) {
++			break;
++		}
++	}
++	if (i == LEN(batstates))
++		strcpy(sbatstate, BATSTATE_SYM_UNKNOWN);
++	else
++		strcpy(sbatstate, batstates[i].symbol);
++
++	return sbatstate;
+ }
+ 
+-char *
+-loadavg(void)
++int
++getbatpct(const char *bat)
+ {
+-	double avgs[3];
++	char *co;
++	int batcap = -1;
+ 
+-	if (getloadavg(avgs, 3) < 0)
+-		return smprintf("");
++	co = readfile("/sys/class/power_supply/%s/capacity", bat);
++	if (co == NULL)
++		return batcap;
++	sscanf(co, "%d", &batcap);
++
++	if (!strcmp(getbatstate(bat), BATSTATE_FULL))
++		batcap = 100;
+ 
+-	return smprintf("%.2f %.2f %.2f", avgs[0], avgs[1], avgs[2]);
++	return batcap;
+ }
+ 
+-char *
+-readfile(char *base, char *file)
++const char *
++getbatcolcode(const char *bat)
+ {
+-	char *path, line[513];
+-	FILE *fd;
++	int batcap = getbatpct(bat);
+ 
+-	memset(line, 0, sizeof(line));
++	if (batcap < 0)
++		return "!BCL";
+ 
+-	path = smprintf("%s/%s", base, file);
+-	fd = fopen(path, "r");
+-	free(path);
+-	if (fd == NULL)
+-		return NULL;
++	if (batcap >= 0 && batcap < 10) 
++		return BAT_CRITICAL_COL_CODE;
++	else if (batcap >= 10 && batcap < 30)
++		return BAT_WARN_COL_CODE;
++	else
++		return BAT_OK_COL_CODE;
++}
+ 
+-	if (fgets(line, sizeof(line)-1, fd) == NULL)
+-		return NULL;
+-	fclose(fd);
++char *
++getbatstatus(const char *bat)
++{
++	static char batcapbuf[5] = "!BAT";
++	int batcap = getbatpct(bat);
+ 
+-	return smprintf("%s", line);
++	if (batcap < 0)
++		return batcapbuf;
++
++	return fmtpct(batcapbuf, LEN(batcapbuf), batcap);
+ }
+ 
+ char *
+-getbattery(char *base)
++getbatrem(const char *bat)
+ {
+-	char *co, status;
+-	int descap, remcap;
++	static char batrembuf[6] = "!BRM";
+ 
+-	descap = -1;
+-	remcap = -1;
++	char *co;
++	double timeleft;
++	uintmax_t charge_full, charge_now, current_now, m, h;
+ 
+-	co = readfile(base, "present");
+-	if (co == NULL)
+-		return smprintf("");
+-	if (co[0] != '1') {
+-		free(co);
+-		return smprintf("not present");
++	co = readfile("/sys/class/power_supply/%s/charge_full", bat);
++	if (co == NULL) {
++		co = readfile("/sys/class/power_supply/%s/energy_full", bat);
++		if (co == NULL)
++			return batrembuf;
+ 	}
+-	free(co);
++	sscanf(co, "%ju", &charge_full);
+ 
+-	co = readfile(base, "charge_full_design");
++	co = readfile("/sys/class/power_supply/%s/charge_now", bat);
+ 	if (co == NULL) {
+-		co = readfile(base, "energy_full_design");
++		co = readfile("/sys/class/power_supply/%s/energy_now", bat);
+ 		if (co == NULL)
+-			return smprintf("");
++			return batrembuf;
+ 	}
+-	sscanf(co, "%d", &descap);
+-	free(co);
++	sscanf(co, "%ju", &charge_now);
+ 
+-	co = readfile(base, "charge_now");
++	co = readfile("/sys/class/power_supply/%s/current_now", bat);
+ 	if (co == NULL) {
+-		co = readfile(base, "energy_now");
++		co = readfile("/sys/class/power_supply/%s/power_now", bat);
+ 		if (co == NULL)
+-			return smprintf("");
++			return batrembuf;
+ 	}
+-	sscanf(co, "%d", &remcap);
+-	free(co);
+-
+-	co = readfile(base, "status");
+-	if (!strncmp(co, "Discharging", 11)) {
+-		status = '-';
+-	} else if(!strncmp(co, "Charging", 8)) {
+-		status = '+';
++	sscanf(co, "%ju", &current_now);
++
++	memset(batrembuf, 0, LEN(batrembuf));
++	if (current_now != 0) {
++		if (!strcmp(getbatstate(bat), BATSTATE_DISCHARGING))
++			timeleft = (double)charge_now / (double)current_now;
++		else
++			timeleft = ((double)charge_full - (double)charge_now) / (double)current_now;
++		h = timeleft;
++		m = (timeleft - (double)h) * 60;
++
++		sprintf(batrembuf, "%02ju:%02ju", h, m);
+ 	} else {
+-		status = '?';
+-	}
+ 
+-	if (remcap < 0 || descap < 0)
+-		return smprintf("invalid");
++		sprintf(batrembuf, "--:--");
++	}
+ 
+-	return smprintf("%.0f%%%c", ((float)remcap / (float)descap) * 100, status);
++	return batrembuf;
+ }
+ 
+ char *
+-gettemperature(char *base, char *sensor)
++getbrightstatus(const char *device)
+ {
++    static char brtbuf[5] = "!BRT";
++
+ 	char *co;
++	int brt = -1, maxbrt = -1, brtlevel = -1;
++
++	co = readfile("/sys/class/backlight/%s/max_brightness", device);
++	if (co == NULL)
++		return brtbuf;
++	sscanf(co, "%d", &maxbrt);
+ 
+-	co = readfile(base, sensor);
++	co = readfile("/sys/class/backlight/%s/brightness", device);
+ 	if (co == NULL)
+-		return smprintf("");
+-	return smprintf("%02.0f°C", atof(co) / 1000);
++		return brtbuf;
++	sscanf(co, "%d", &brt);
++
++    brtlevel = graduatepct(brt * 100 / maxbrt);
++	
++	return fmtpct(brtbuf, LEN(brtbuf), brtlevel);
++}
++
++char *
++getvolstatus(const char *card)
++{
++    static snd_mixer_selem_channel_id_t channels[] = {
++        SND_MIXER_SCHN_FRONT_LEFT
++        ,SND_MIXER_SCHN_FRONT_RIGHT
++        ,SND_MIXER_SCHN_REAR_LEFT
++        ,SND_MIXER_SCHN_REAR_RIGHT
++        ,SND_MIXER_SCHN_FRONT_CENTER
++        ,SND_MIXER_SCHN_WOOFER
++        ,SND_MIXER_SCHN_SIDE_LEFT
++        ,SND_MIXER_SCHN_SIDE_RIGHT
++        ,SND_MIXER_SCHN_REAR_CENTER
++    };
++
++    static char volbuf[5] = "!VOL";
++
++	snd_mixer_t *handle;
++    snd_mixer_selem_id_t *sid;
++	snd_mixer_elem_t *elem;
++	long min, max, chvol, resvol = -1;
++    int i, vlevel;
++
++    if (snd_mixer_open(&handle, 0) < 0)
++        return volbuf;
++    if (snd_mixer_attach(handle, card) < 0) {
++		snd_mixer_close(handle);
++        return volbuf;
++	}
++    if (snd_mixer_selem_register(handle, NULL, NULL) < 0) {
++		snd_mixer_close(handle);
++        return volbuf;
++	}
++    if (snd_mixer_load(handle) < 0) {
++		snd_mixer_close(handle);
++        return volbuf;
++	}
++
++    snd_mixer_selem_id_alloca(&sid);
++    snd_mixer_selem_id_set_index(sid, 0);
++    snd_mixer_selem_id_set_name(sid, SOUND_ELEMENT);
++    elem = snd_mixer_find_selem(handle, sid);
++    if (elem == NULL) {
++		snd_mixer_close(handle);
++        return volbuf;
++	}
++
++    if (snd_mixer_selem_get_playback_volume_range(elem, &min, &max) < 0) {
++		snd_mixer_close(handle);
++        return volbuf;
++	}
++
++    for (i = 0; i < LEN(channels); i++) {
++        if (snd_mixer_selem_has_playback_channel(elem, channels[i])) {
++            if (snd_mixer_selem_get_playback_volume(elem, channels[i], &chvol) < 0) {
++				snd_mixer_close(handle);
++				return volbuf;
++			}
++            resvol = chvol > resvol ? chvol : resvol;
++        }
++    }
++
++	snd_mixer_close(handle);
++    vlevel = graduatepct((int)round(resvol * 100 / (double)max));
++	
++	return fmtpct(volbuf, LEN(volbuf), vlevel);
++}
++
++static int
++isvalidlayout(char *sym)
++{
++	size_t i;
++	/* invalid symbols from xkb rules config */
++	static const char *invalid[] = { "evdev", "inet", "pc", "base" };
++
++	for (i = 0; i < LEN(invalid); i++) {
++		if (!strncmp(sym, invalid[i], strlen(invalid[i]))) {
++			return 0;
++		}
++	}
++
++	return 1;
++}
++
++const char *
++getsklayout(Display *dpy)
++{
++	static char klbuf[5] = "!SKL";
++
++	XkbDescRec *desc;
++	XkbStateRec state;
++	char *symbols, *tok, *layout = NULL;
++	int grp;
++
++	if (!(desc = XkbAllocKeyboard()))
++		return klbuf;
++
++	if (XkbGetNames(dpy, XkbSymbolsNameMask, desc)) {
++		XkbFreeKeyboard(desc, XkbSymbolsNameMask, 1);
++		return klbuf;
++	}
++
++	if (XkbGetState(dpy, XkbUseCoreKbd, &state)) {
++		XkbFreeKeyboard(desc, XkbSymbolsNameMask, 1);
++		return klbuf;
++	}
++
++	if (!(symbols = XGetAtomName(dpy, desc->names->symbols))) {
++		XkbFreeKeyboard(desc, XkbSymbolsNameMask, 1);
++		return klbuf;
++	}
++
++	tok = strtok(symbols, "+:");
++	for (grp = 0; tok && grp <= state.group; tok = strtok(NULL, "+:")) {
++		if (!isvalidlayout(tok)) {
++			continue;
++		} else if (strlen(tok) == 1 && isdigit(tok[0])) {
++			/* ignore :2, :3, :4 (additional layout groups) */
++			continue;
++		}
++		layout = tok;
++		grp++;
++	}
++
++	memset(klbuf, 0, LEN(klbuf));
++	klbuf[0] = toupper((unsigned char) *layout);
++	klbuf[1] = toupper((unsigned char) *(++layout));
++
++	XFree(symbols);
++	XkbFreeKeyboard(desc, XkbSymbolsNameMask, 1);
++
++    return klbuf;
++} 
++
++const char *
++getdatetime(const char *fmt)
++{
++	static char dttbuf[6] = "!DTT";
++	time_t t;
++
++	t = time(NULL);
++	if (!strftime(dttbuf, sizeof(dttbuf), fmt, localtime(&t))) {
++		return dttbuf;
++	}
++
++	return dttbuf;
+ }
+ 
+ int
+-main(void)
++main(int argc, const char *argv[])
+ {
+-	char *status;
+-	char *avgs;
+-	char *bat;
+-	char *bat1;
+-	char *tmar;
+-	char *tmutc;
+-	char *tmbln;
+-	char *t0, *t1, *t2;
++    if (!setlocale(LC_CTYPE, "")) {
++        fputs("dwmstatus: no locale support\n", stderr);
++		return 1;
++	}
+ 
+ 	if (!(dpy = XOpenDisplay(NULL))) {
+-		fprintf(stderr, "dwmstatus: cannot open display.\n");
++		fputs("dwmstatus: cannot open display.\n", stderr);
+ 		return 1;
+ 	}
+ 
+-	for (;;sleep(60)) {
+-		avgs = loadavg();
+-		bat = getbattery("/sys/class/power_supply/BAT0");
+-		bat1 = getbattery("/sys/class/power_supply/BAT1");
+-		tmar = mktimes("%H:%M", tzargentina);
+-		tmutc = mktimes("%H:%M", tzutc);
+-		tmbln = mktimes("KW %W %a %d %b %H:%M %Z %Y", tzberlin);
+-		t0 = gettemperature("/sys/devices/virtual/hwmon/hwmon0", "temp1_input");
+-		t1 = gettemperature("/sys/devices/virtual/hwmon/hwmon2", "temp1_input");
+-		t2 = gettemperature("/sys/devices/virtual/hwmon/hwmon4", "temp1_input");
+-
+-		status = smprintf("T:%s|%s|%s L:%s B:%s|%s A:%s U:%s %s",
+-				t0, t1, t2, avgs, bat, bat1, tmar, tmutc,
+-				tmbln);
+-		setstatus(status);
+-
+-		free(t0);
+-		free(t1);
+-		free(t2);
+-		free(avgs);
+-		free(bat);
+-		free(bat1);
+-		free(tmar);
+-		free(tmutc);
+-		free(tmbln);
+-		free(status);
++	for (;;sleep(INTERVAL)) {
++		setstatus(FMT_STATUS,
++				  getbatcolcode(DEVICE_BATTERY),
++				  getbatstatus(DEVICE_BATTERY),
++				  getbatstatesym(DEVICE_BATTERY),
++				  getbatrem(DEVICE_BATTERY),
++				  getbrightstatus(DEVICE_BRIGHTNESS),
++				  getvolstatus(SOUND_CARD),
++				  getsklayout(dpy),
++				  getdatetime(FMT_DATE));
+ 	}
+ 
+ 	XCloseDisplay(dpy);
+ 
+ 	return 0;
+ }
+-
