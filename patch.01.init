@@ -1,64 +1,6 @@
-diff --git a/Makefile b/Makefile
-index 62240a5..96c2694 100644
---- a/Makefile
-+++ b/Makefile
-@@ -1,4 +1,4 @@
--# See LICENSE file for copyright and license details.
-+# dwmstatus - status for dwm
- 
- include config.mk
- 
-@@ -17,7 +17,10 @@ options:
- 	@echo CC $<
- 	@${CC} -c ${CFLAGS} $<
- 
--${OBJ}: config.mk
-+${OBJ}: config.h config.mk
-+
-+config.h:
-+	cp config.def.h $@
- 
- ${NAME}: ${OBJ}
- 	@echo CC -o $@
-@@ -25,25 +28,17 @@ ${NAME}: ${OBJ}
- 
- clean:
- 	@echo cleaning
--	@rm -f ${NAME} ${OBJ} ${NAME}-${VERSION}.tar.gz
--
--dist: clean
--	@echo creating dist tarball
--	@mkdir -p ${NAME}-${VERSION}
--	@cp -R Makefile LICENSE config.mk \
--		${SRC} ${NAME}-${VERSION}
--	@tar -cf ${NAME}-${VERSION}.tar ${NAME}-${VERSION}
--	@gzip ${NAME}-${VERSION}.tar
--	@rm -rf ${NAME}-${VERSION}
-+	@rm -f ${NAME} ${OBJ}
- 
- install: all
--	@echo installing executable file to ${DESTDIR}${PREFIX}/bin
--	@mkdir -p ${DESTDIR}${PREFIX}/bin
--	@cp -f ${NAME} ${DESTDIR}${PREFIX}/bin
--	@chmod 755 ${DESTDIR}${PREFIX}/bin/${NAME}
-+	mkdir -p ${DESTDIR}${PREFIX}/bin
-+	cp -f ${NAME} ${DESTDIR}${PREFIX}/bin
-+	chmod 755 ${DESTDIR}${PREFIX}/bin/${NAME}
- 
- uninstall:
--	@echo removing executable file from ${DESTDIR}${PREFIX}/bin
--	@rm -f ${DESTDIR}${PREFIX}/bin/${NAME}
-+	rm -f ${DESTDIR}${PREFIX}/bin/${NAME}
-+
-+run:
-+	./${NAME}
- 
--.PHONY: all options clean dist install uninstall
-+.PHONY: all options clean install uninstall run
-diff --git a/config.def.h b/config.def.h
-index e69de29..3f5c641 100644
---- a/config.def.h
-+++ b/config.def.h
+diff -u dwmstatus_backup/config.def.h dwmstatus/config.def.h
+--- dwmstatus_backup/config.def.h	2022-01-09 22:38:32.266798700 +0300
++++ dwmstatus/config.def.h	2022-01-09 22:39:24.824279654 +0300
 @@ -0,0 +1,56 @@
 +/* apt-get install libasound2-dev */
 +
@@ -116,10 +58,9 @@ index e69de29..3f5c641 100644
 + */
 +
 +static const char *FMT_STATUS = "%s≡ %s %s %s\x0a ☼ %s \x08♫ %s \x11| %s \x0b%s";
-diff --git a/config.mk b/config.mk
-index 0ec9e47..3da178b 100644
---- a/config.mk
-+++ b/config.mk
+diff -u dwmstatus_backup/config.mk dwmstatus/config.mk
+--- dwmstatus_backup/config.mk	2022-01-09 22:38:32.266798700 +0300
++++ dwmstatus/config.mk	2022-01-09 22:39:24.824279654 +0300
 @@ -1,29 +1,16 @@
  NAME = dwmstatus
 -VERSION = 1.0
@@ -153,11 +94,10 @@ index 0ec9e47..3da178b 100644
  
  # compiler and linker
  CC = cc
-diff --git a/dwmstatus.c b/dwmstatus.c
-index d2a4b03..625844d 100644
---- a/dwmstatus.c
-+++ b/dwmstatus.c
-@@ -1,227 +1,429 @@
+diff -u dwmstatus_backup/dwmstatus.c dwmstatus/dwmstatus.c
+--- dwmstatus_backup/dwmstatus.c	2022-01-09 22:38:32.270798504 +0300
++++ dwmstatus/dwmstatus.c	2022-01-09 22:39:46.939250199 +0300
+@@ -1,227 +1,432 @@
 -/*
 - * Copy me if you can.
 - * by 20h
@@ -347,14 +287,14 @@ index d2a4b03..625844d 100644
 -	double avgs[3];
 +	char *co;
 +	int batcap = -1;
- 
--	if (getloadavg(avgs, 3) < 0)
--		return smprintf("");
++
 +	co = readfile("/sys/class/power_supply/%s/capacity", bat);
 +	if (co == NULL)
 +		return batcap;
 +	sscanf(co, "%d", &batcap);
-+
+ 
+-	if (getloadavg(avgs, 3) < 0)
+-		return smprintf("");
 +	if (!strcmp(getbatstate(bat), BATSTATE_FULL))
 +		batcap = 100;
  
@@ -374,15 +314,15 @@ index d2a4b03..625844d 100644
 -	memset(line, 0, sizeof(line));
 +	if (batcap < 0)
 +		return "!BCL";
-
-+	if (!strcmp(getbatstate(bat), BATSTATE_CHARGING))
-+		return BAT_OK_COL_CODE;
  
 -	path = smprintf("%s/%s", base, file);
 -	fd = fopen(path, "r");
 -	free(path);
 -	if (fd == NULL)
 -		return NULL;
++	if (!strcmp(getbatstate(bat), BATSTATE_CHARGING))
++		return BAT_OK_COL_CODE;
++ 
 +	if (batcap >= 0 && batcap < 10) 
 +		return BAT_CRITICAL_COL_CODE;
 +	else if (batcap >= 10 && batcap < 30)
@@ -460,12 +400,6 @@ index d2a4b03..625844d 100644
  	}
 -	sscanf(co, "%d", &remcap);
 -	free(co);
--
--	co = readfile(base, "status");
--	if (!strncmp(co, "Discharging", 11)) {
--		status = '-';
--	} else if(!strncmp(co, "Charging", 8)) {
--		status = '+';
 +	sscanf(co, "%ju", &current_now);
 +
 +	memset(batrembuf, 0, LEN(batrembuf));
@@ -476,7 +410,12 @@ index d2a4b03..625844d 100644
 +			timeleft = ((double)charge_full - (double)charge_now) / (double)current_now;
 +		h = timeleft;
 +		m = (timeleft - (double)h) * 60;
-+
+ 
+-	co = readfile(base, "status");
+-	if (!strncmp(co, "Discharging", 11)) {
+-		status = '-';
+-	} else if(!strncmp(co, "Charging", 8)) {
+-		status = '+';
 +		sprintf(batrembuf, "%02ju:%02ju", h, m);
  	} else {
 -		status = '?';
@@ -499,17 +438,17 @@ index d2a4b03..625844d 100644
 +
  	char *co;
 +	int brt = -1, maxbrt = -1, brtlevel = -1;
-+
-+	co = readfile("/sys/class/backlight/%s/max_brightness", device);
-+	if (co == NULL)
-+		return brtbuf;
-+	sscanf(co, "%d", &maxbrt);
  
 -	co = readfile(base, sensor);
-+	co = readfile("/sys/class/backlight/%s/brightness", device);
++	co = readfile("/sys/class/backlight/%s/max_brightness", device);
  	if (co == NULL)
 -		return smprintf("");
 -	return smprintf("%02.0f°C", atof(co) / 1000);
++		return brtbuf;
++	sscanf(co, "%d", &maxbrt);
++
++	co = readfile("/sys/class/backlight/%s/brightness", device);
++	if (co == NULL)
 +		return brtbuf;
 +	sscanf(co, "%d", &brt);
 +
@@ -732,3 +671,73 @@ index d2a4b03..625844d 100644
  	return 0;
  }
 -
+Common subdirectories: dwmstatus_backup/.git and dwmstatus/.git
+diff -u dwmstatus_backup/Makefile dwmstatus/Makefile
+--- dwmstatus_backup/Makefile	2022-01-09 22:38:32.266798700 +0300
++++ dwmstatus/Makefile	2022-01-09 22:39:24.824279654 +0300
+@@ -1,4 +1,4 @@
+-# See LICENSE file for copyright and license details.
++# dwmstatus - status for dwm
+ 
+ include config.mk
+ 
+@@ -17,7 +17,10 @@
+ 	@echo CC $<
+ 	@${CC} -c ${CFLAGS} $<
+ 
+-${OBJ}: config.mk
++${OBJ}: config.h config.mk
++
++config.h:
++	cp config.def.h $@
+ 
+ ${NAME}: ${OBJ}
+ 	@echo CC -o $@
+@@ -25,25 +28,17 @@
+ 
+ clean:
+ 	@echo cleaning
+-	@rm -f ${NAME} ${OBJ} ${NAME}-${VERSION}.tar.gz
+-
+-dist: clean
+-	@echo creating dist tarball
+-	@mkdir -p ${NAME}-${VERSION}
+-	@cp -R Makefile LICENSE config.mk \
+-		${SRC} ${NAME}-${VERSION}
+-	@tar -cf ${NAME}-${VERSION}.tar ${NAME}-${VERSION}
+-	@gzip ${NAME}-${VERSION}.tar
+-	@rm -rf ${NAME}-${VERSION}
++	@rm -f ${NAME} ${OBJ}
+ 
+ install: all
+-	@echo installing executable file to ${DESTDIR}${PREFIX}/bin
+-	@mkdir -p ${DESTDIR}${PREFIX}/bin
+-	@cp -f ${NAME} ${DESTDIR}${PREFIX}/bin
+-	@chmod 755 ${DESTDIR}${PREFIX}/bin/${NAME}
++	mkdir -p ${DESTDIR}${PREFIX}/bin
++	cp -f ${NAME} ${DESTDIR}${PREFIX}/bin
++	chmod 755 ${DESTDIR}${PREFIX}/bin/${NAME}
+ 
+ uninstall:
+-	@echo removing executable file from ${DESTDIR}${PREFIX}/bin
+-	@rm -f ${DESTDIR}${PREFIX}/bin/${NAME}
++	rm -f ${DESTDIR}${PREFIX}/bin/${NAME}
++
++run:
++	./${NAME}
+ 
+-.PHONY: all options clean dist install uninstall
++.PHONY: all options clean install uninstall run
+diff -u dwmstatus_backup/patch.01.init dwmstatus/patch.01.init
+--- dwmstatus_backup/patch.01.init	2022-01-09 22:38:32.270798504 +0300
++++ dwmstatus/patch.01.init	2022-01-09 22:39:19.708520300 +0300
+@@ -375,9 +375,6 @@
+ +	if (batcap < 0)
+ +		return "!BCL";
+ 
+-+	if (!strcmp(getbatstate(bat), BATSTATE_CHARGING))
+-+		return BAT_OK_COL_CODE;
+- 
+ -	path = smprintf("%s/%s", base, file);
+ -	fd = fopen(path, "r");
+ -	free(path);
