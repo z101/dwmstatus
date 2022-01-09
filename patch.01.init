@@ -374,6 +374,9 @@ index d2a4b03..625844d 100644
 -	memset(line, 0, sizeof(line));
 +	if (batcap < 0)
 +		return "!BCL";
+
++	if (!strcmp(getbatstate(bat), BATSTATE_CHARGING))
++		return BAT_OK_COL_CODE;
  
 -	path = smprintf("%s/%s", base, file);
 -	fd = fopen(path, "r");
