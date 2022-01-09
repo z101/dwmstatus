@@ -1,6 +1,6 @@
-diff -u dwmstatus_backup/config.def.h dwmstatus/config.def.h
---- dwmstatus_backup/config.def.h	2022-01-09 22:38:32.266798700 +0300
-+++ dwmstatus/config.def.h	2022-01-09 22:39:24.824279654 +0300
+diff -u a/config.def.h b/config.def.h
+--- a/config.def.h	2022-01-09 22:38:32.266798700 +0300
++++ b/config.def.h	2022-01-09 22:39:24.824279654 +0300
 @@ -0,0 +1,56 @@
 +/* apt-get install libasound2-dev */
 +
@@ -58,9 +58,9 @@ diff -u dwmstatus_backup/config.def.h dwmstatus/config.def.h
 + */
 +
 +static const char *FMT_STATUS = "%s≡ %s %s %s\x0a ☼ %s \x08♫ %s \x11| %s \x0b%s";
-diff -u dwmstatus_backup/config.mk dwmstatus/config.mk
---- dwmstatus_backup/config.mk	2022-01-09 22:38:32.266798700 +0300
-+++ dwmstatus/config.mk	2022-01-09 22:39:24.824279654 +0300
+diff -u a/config.mk b/config.mk
+--- a/config.mk	2022-01-09 22:38:32.266798700 +0300
++++ b/config.mk	2022-01-09 22:39:24.824279654 +0300
 @@ -1,29 +1,16 @@
  NAME = dwmstatus
 -VERSION = 1.0
@@ -94,9 +94,9 @@ diff -u dwmstatus_backup/config.mk dwmstatus/config.mk
  
  # compiler and linker
  CC = cc
-diff -u dwmstatus_backup/dwmstatus.c dwmstatus/dwmstatus.c
---- dwmstatus_backup/dwmstatus.c	2022-01-09 22:38:32.270798504 +0300
-+++ dwmstatus/dwmstatus.c	2022-01-09 22:39:46.939250199 +0300
+diff -u a/dwmstatus.c b/dwmstatus.c
+--- a/dwmstatus.c	2022-01-09 22:38:32.270798504 +0300
++++ b/dwmstatus.c	2022-01-09 22:39:46.939250199 +0300
 @@ -1,227 +1,432 @@
 -/*
 - * Copy me if you can.
@@ -671,10 +671,9 @@ diff -u dwmstatus_backup/dwmstatus.c dwmstatus/dwmstatus.c
  	return 0;
  }
 -
-Common subdirectories: dwmstatus_backup/.git and dwmstatus/.git
-diff -u dwmstatus_backup/Makefile dwmstatus/Makefile
---- dwmstatus_backup/Makefile	2022-01-09 22:38:32.266798700 +0300
-+++ dwmstatus/Makefile	2022-01-09 22:39:24.824279654 +0300
+diff -u a/Makefile b/Makefile
+--- a/Makefile	2022-01-09 22:38:32.266798700 +0300
++++ b/Makefile	2022-01-09 22:39:24.824279654 +0300
 @@ -1,4 +1,4 @@
 -# See LICENSE file for copyright and license details.
 +# dwmstatus - status for dwm
@@ -728,16 +727,3 @@ diff -u dwmstatus_backup/Makefile dwmstatus/Makefile
  
 -.PHONY: all options clean dist install uninstall
 +.PHONY: all options clean install uninstall run
-diff -u dwmstatus_backup/patch.01.init dwmstatus/patch.01.init
---- dwmstatus_backup/patch.01.init	2022-01-09 22:38:32.270798504 +0300
-+++ dwmstatus/patch.01.init	2022-01-09 22:39:19.708520300 +0300
-@@ -375,9 +375,6 @@
- +	if (batcap < 0)
- +		return "!BCL";
- 
--+	if (!strcmp(getbatstate(bat), BATSTATE_CHARGING))
--+		return BAT_OK_COL_CODE;
-- 
- -	path = smprintf("%s/%s", base, file);
- -	fd = fopen(path, "r");
- -	free(path);
